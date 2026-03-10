@@ -1,0 +1,123 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 940 640" font-family="'Segoe UI', Arial, sans-serif" font-size="13">
+
+  <!-- Background -->
+  <rect width="940" height="640" fill="#F8F9FA" rx="12"/>
+
+  <!-- Title -->
+  <text x="470" y="34" text-anchor="middle" font-size="17" font-weight="700" fill="#1A1A2E">Polymarket Prediction Job — Architecture</text>
+  <line x1="60" y1="44" x2="880" y2="44" stroke="#CCCCCC" stroke-width="1"/>
+
+  <!-- ══════════════════════════════════════════ -->
+  <!-- CLI INPUTS BOX                            -->
+  <!-- ══════════════════════════════════════════ -->
+  <rect x="60" y="60" width="220" height="160" rx="8" fill="#EFF6FF" stroke="#3B82F6" stroke-width="1.5"/>
+  <rect x="60" y="60" width="220" height="30" rx="8" fill="#3B82F6"/>
+  <rect x="60" y="78" width="220" height="12" fill="#3B82F6"/>
+  <text x="170" y="80" text-anchor="middle" font-size="12" font-weight="700" fill="white">CLI Flags</text>
+  <text x="80" y="112" fill="#1E3A5F" font-size="12"><tspan font-family="monospace" font-size="11" fill="#1D4ED8">--city</tspan>       london</text>
+  <text x="80" y="132" fill="#1E3A5F" font-size="12"><tspan font-family="monospace" font-size="11" fill="#1D4ED8">--date</tspan>       2026-03-07</text>
+  <text x="80" y="152" fill="#1E3A5F" font-size="12"><tspan font-family="monospace" font-size="11" fill="#1D4ED8">--temp</tspan>       10  <tspan fill="#888" font-size="10">(optional)</tspan></text>
+  <text x="80" y="172" fill="#1E3A5F" font-size="12"><tspan font-family="monospace" font-size="11" fill="#1D4ED8">--fidelity</tspan>   60</text>
+  <text x="80" y="192" fill="#1E3A5F" font-size="12"><tspan font-family="monospace" font-size="11" fill="#1D4ED8">--dry-run</tspan>    false</text>
+
+  <!-- Arrow: CLI → Runner -->
+  <line x1="170" y1="220" x2="170" y2="268" stroke="#555" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <!-- ══════════════════════════════════════════ -->
+  <!-- RUNNER BOX                                -->
+  <!-- ══════════════════════════════════════════ -->
+  <rect x="60" y="270" width="340" height="200" rx="8" fill="#F0FDF4" stroke="#16A34A" stroke-width="1.5"/>
+  <rect x="60" y="270" width="340" height="30" rx="8" fill="#16A34A"/>
+  <rect x="60" y="288" width="340" height="12" fill="#16A34A"/>
+  <text x="230" y="290" text-anchor="middle" font-size="12" font-weight="700" fill="white">cmd/polymarket  (runner)</text>
+
+  <!-- Sub-box: client -->
+  <rect x="80" y="312" width="300" height="50" rx="6" fill="white" stroke="#86EFAC" stroke-width="1.2"/>
+  <text x="230" y="332" text-anchor="middle" font-size="11" font-weight="600" fill="#166534">internal/polymarket/client.go</text>
+  <text x="230" y="350" text-anchor="middle" font-size="10" fill="#555">HTTP client — Gamma API + CLOB API</text>
+
+  <!-- Sub-box: models -->
+  <rect x="80" y="374" width="300" height="50" rx="6" fill="white" stroke="#86EFAC" stroke-width="1.2"/>
+  <text x="230" y="394" text-anchor="middle" font-size="11" font-weight="600" fill="#166534">internal/polymarket/models.go</text>
+  <text x="230" y="412" text-anchor="middle" font-size="10" fill="#555">PredictionSnapshot · StringSlice · GammaMarket</text>
+
+  <!-- Step labels inside runner -->
+  <text x="80" y="446" font-size="10" fill="#555">① Build event slug  ② Fetch event + hydrate markets  ③ Fetch price history  ④ Output</text>
+
+  <!-- ══════════════════════════════════════════ -->
+  <!-- EXTERNAL APIS                             -->
+  <!-- ══════════════════════════════════════════ -->
+
+  <!-- Gamma API -->
+  <rect x="480" y="270" width="400" height="90" rx="8" fill="#FFF7ED" stroke="#EA580C" stroke-width="1.5"/>
+  <rect x="480" y="270" width="400" height="28" rx="8" fill="#EA580C"/>
+  <rect x="480" y="286" width="400" height="12" fill="#EA580C"/>
+  <text x="680" y="288" text-anchor="middle" font-size="12" font-weight="700" fill="white">Polymarket Gamma API</text>
+  <text x="500" y="316" font-size="11" fill="#7C2D12" font-family="monospace">GET /events?slug={event-slug}</text>
+  <text x="500" y="334" font-size="10" fill="#555">→ event metadata + embedded markets list</text>
+  <text x="500" y="350" font-size="11" fill="#7C2D12" font-family="monospace">GET /markets/{numeric-id}</text>
+
+  <!-- Arrow: Runner → Gamma API -->
+  <line x1="400" y1="305" x2="478" y2="305" stroke="#EA580C" stroke-width="1.5" stroke-dasharray="5,3" marker-end="url(#arrowOrange)"/>
+  <text x="436" y="299" text-anchor="middle" font-size="9" fill="#EA580C">① ②</text>
+
+  <!-- CLOB API -->
+  <rect x="480" y="390" width="400" height="80" rx="8" fill="#FFF7ED" stroke="#EA580C" stroke-width="1.5"/>
+  <rect x="480" y="390" width="400" height="28" rx="8" fill="#EA580C"/>
+  <rect x="480" y="406" width="400" height="12" fill="#EA580C"/>
+  <text x="680" y="408" text-anchor="middle" font-size="12" font-weight="700" fill="white">Polymarket CLOB API</text>
+  <text x="500" y="436" font-size="11" fill="#7C2D12" font-family="monospace">GET /prices-history?market={tokenId}</text>
+  <text x="500" y="454" font-size="10" fill="#555">→ YES + NO price time series  (fidelity in minutes)</text>
+
+  <!-- Arrow: Runner → CLOB API -->
+  <line x1="400" y1="390" x2="478" y2="420" stroke="#EA580C" stroke-width="1.5" stroke-dasharray="5,3" marker-end="url(#arrowOrange)"/>
+  <text x="436" y="413" text-anchor="middle" font-size="9" fill="#EA580C">③</text>
+
+  <!-- ══════════════════════════════════════════ -->
+  <!-- OUTPUTS                                   -->
+  <!-- ══════════════════════════════════════════ -->
+
+  <!-- Arrow: Runner → stdout (dry-run) -->
+  <line x1="130" y1="470" x2="130" y2="530" stroke="#6B7280" stroke-width="1.5" stroke-dasharray="6,3" marker-end="url(#arrowGray)"/>
+
+  <!-- stdout box -->
+  <rect x="60" y="532" width="200" height="70" rx="8" fill="#F9FAFB" stroke="#9CA3AF" stroke-width="1.5" stroke-dasharray="6,3"/>
+  <text x="160" y="558" text-anchor="middle" font-size="12" font-weight="600" fill="#374151">stdout  (JSONL)</text>
+  <text x="160" y="576" text-anchor="middle" font-size="10" fill="#6B7280">newline-delimited JSON</text>
+  <text x="160" y="592" text-anchor="middle" font-size="10" fill="#9CA3AF">when --dry-run is set</text>
+
+  <!-- Arrow: Runner → BQ (default) -->
+  <line x1="310" y1="470" x2="530" y2="530" stroke="#7C3AED" stroke-width="1.5" marker-end="url(#arrowPurple)"/>
+  <text x="395" y="512" text-anchor="middle" font-size="10" fill="#7C3AED" font-weight="600">default (TODO: wire up)</text>
+
+  <!-- BigQuery table box -->
+  <rect x="480" y="532" width="400" height="88" rx="8" fill="#FAF5FF" stroke="#7C3AED" stroke-width="1.5"/>
+  <rect x="480" y="532" width="400" height="28" rx="8" fill="#7C3AED"/>
+  <rect x="480" y="548" width="400" height="12" fill="#7C3AED"/>
+  <text x="680" y="550" text-anchor="middle" font-size="12" font-weight="700" fill="white">BigQuery — polymarket_predictions</text>
+  <!-- Schema columns in two groups -->
+  <text x="496" y="574" font-size="10" fill="#4C1D95">city · date · timestamp · temp_threshold</text>
+  <text x="496" y="590" font-size="10" fill="#4C1D95">yes_cost · no_cost · best_bid · best_ask · spread</text>
+  <text x="496" y="606" font-size="10" fill="#4C1D95">volume_24h · liquidity · market_id · event_slug · ingested_at</text>
+  <!-- Partition / cluster note -->
+  <text x="878" y="606" text-anchor="end" font-size="9" fill="#7C3AED">PARTITION date · CLUSTER city, temp_threshold</text>
+
+  <!-- ══════════════════════════════════════════ -->
+  <!-- ARROWHEAD MARKERS                         -->
+  <!-- ══════════════════════════════════════════ -->
+  <defs>
+    <marker id="arrow" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+      <path d="M0,0 L0,6 L8,3 z" fill="#555"/>
+    </marker>
+    <marker id="arrowOrange" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+      <path d="M0,0 L0,6 L8,3 z" fill="#EA580C"/>
+    </marker>
+    <marker id="arrowGray" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+      <path d="M0,0 L0,6 L8,3 z" fill="#6B7280"/>
+    </marker>
+    <marker id="arrowPurple" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+      <path d="M0,0 L0,6 L8,3 z" fill="#7C3AED"/>
+    </marker>
+  </defs>
+
+</svg>

@@ -28,5 +28,25 @@ go.work.sum
 .env
 
 # Editor/IDE
-# .idea/
-# .vscode/
+.idea/
+.vscode/
+*.iml
+
+# Compiled binaries
+/bin/
+dist/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# GCP credentials / service account keys
+*.json
+!go.sum
+service-account*.json
+credentials*.json
+gcp-key*.json
+
+# Secrets / config
+*.env.*
+config.local.*
