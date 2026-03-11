@@ -38,19 +38,24 @@ type GammaEvent struct {
 
 // GammaMarket represents a single market (outcome) within a Polymarket event.
 type GammaMarket struct {
-	ID             string      `json:"id"`
-	Question       string      `json:"question"`
-	ConditionID    string      `json:"conditionId"`
-	ClobTokenIDs   StringSlice `json:"clobTokenIds"`
-	Outcomes       StringSlice `json:"outcomes"`
-	OutcomePrices  StringSlice `json:"outcomePrices"`
-	Active         bool        `json:"active"`
-	Closed         bool        `json:"closed"`
-	BestBid        float64     `json:"bestBid"`
-	BestAsk        float64     `json:"bestAsk"`
-	LastTradePrice float64     `json:"lastTradePrice"`
-	Volume24hr     float64     `json:"volume24hrNum"`
-	Liquidity      float64     `json:"liquidityNum"`
+	ID              string      `json:"id"`
+	Question        string      `json:"question"`
+	ConditionID     string      `json:"conditionId"`
+	ClobTokenIDs    StringSlice `json:"clobTokenIds"`
+	Outcomes        StringSlice `json:"outcomes"`
+	OutcomePrices   StringSlice `json:"outcomePrices"`
+	Active          bool        `json:"active"`
+	Closed          bool        `json:"closed"`
+	AcceptingOrders bool        `json:"acceptingOrders"`
+	NegRisk         bool        `json:"negRisk"`
+	BestBid         float64     `json:"bestBid"`
+	BestAsk         float64     `json:"bestAsk"`
+	LastTradePrice  float64     `json:"lastTradePrice"`
+	Volume24hr      float64     `json:"volume24hrNum"`
+	VolumeTotal     float64     `json:"volumeNum"`
+	Liquidity       float64     `json:"liquidityNum"`
+	EndDateIso      string      `json:"endDateIso"`
+	StartDateIso    string      `json:"startDateIso"`
 }
 
 // YesTokenID returns the CLOB token ID for the YES outcome.
@@ -82,18 +87,23 @@ type CLOBPricePoint struct {
 
 // PredictionSnapshot is a single row of prediction data — maps 1:1 to the BQ table.
 type PredictionSnapshot struct {
-	City          string    `json:"city"`
-	Date          string    `json:"date"`           // YYYY-MM-DD, the event date
-	Timestamp     time.Time `json:"timestamp"`      // when this price snapshot was taken
-	TempThreshold float64   `json:"temp_threshold"` // e.g. 10.0 for "above 10°C"
-	YesCost       float64   `json:"yes_cost"`       // probability/price of YES (0.0-1.0)
-	NoCost        float64   `json:"no_cost"`        // probability/price of NO (0.0-1.0)
-	BestBid       float64   `json:"best_bid"`       // best bid for YES token at snapshot
-	BestAsk       float64   `json:"best_ask"`       // best ask for YES token at snapshot
-	Spread        float64   `json:"spread"`         // best_ask - best_bid
-	Volume24h     float64   `json:"volume_24h"`     // 24h trading volume at time of fetch
-	Liquidity     float64   `json:"liquidity"`      // market liquidity at time of fetch
-	MarketID      string    `json:"market_id"`      // Polymarket condition ID
-	EventSlug     string    `json:"event_slug"`     // Polymarket event slug
-	IngestedAt    time.Time `json:"ingested_at"`    // when the pipeline collected this row
+	City            string    `json:"city"`
+	Date            string    `json:"date"`             // YYYY-MM-DD, the event date
+	Timestamp       time.Time `json:"timestamp"`        // when this price snapshot was taken
+	TempThreshold   float64   `json:"temp_threshold"`   // e.g. 10.0 for "above 10°C"
+	YesCost         float64   `json:"yes_cost"`         // probability/price of YES (0.0-1.0)
+	NoCost          float64   `json:"no_cost"`          // probability/price of NO (0.0-1.0)
+	BestBid         float64   `json:"best_bid"`         // best bid for YES token at snapshot
+	BestAsk         float64   `json:"best_ask"`         // best ask for YES token at snapshot
+	Spread          float64   `json:"spread"`           // best_ask - best_bid
+	Volume24h       float64   `json:"volume_24h"`       // 24h trading volume at time of fetch
+	VolumeTotal     float64   `json:"volume_total"`     // lifetime trading volume at time of fetch
+	Liquidity       float64   `json:"liquidity"`        // market liquidity at time of fetch
+	MarketID        string    `json:"market_id"`        // Polymarket condition ID
+	EventSlug       string    `json:"event_slug"`       // Polymarket event slug
+	MarketEndDate   string    `json:"market_end_date"`  // ISO date when the market closes/resolves
+	MarketStartDate string    `json:"market_start_date"` // ISO date when the market opened for trading
+	AcceptingOrders bool      `json:"accepting_orders"` // whether the market is still tradeable at fetch time
+	NegRisk         bool      `json:"neg_risk"`         // whether this is a neg-risk market
+	IngestedAt      time.Time `json:"ingested_at"`      // when the pipeline collected this row
 }
