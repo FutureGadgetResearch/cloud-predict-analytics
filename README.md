@@ -16,7 +16,7 @@ Table:    polymarket_snapshots
 
 Full table path: **`fg-polylabs.weather.polymarket_snapshots`**
 
-The table is **day-partitioned on `date`** and **clustered on `city`, `market_id`**, so queries filtered by date range or city are cheap.
+The table is **day-partitioned on `date`** and **clustered on `city`**, so queries filtered by city and date range are cheap.
 
 ### Quick look in BigQuery console
 
@@ -27,7 +27,7 @@ The table is **day-partitioned on `date`** and **clustered on `city`, `market_id
 ### Quick SQL
 
 ```sql
--- Latest YES probability for each threshold in London on a given date
+-- Price history for all thresholds in London on a given date
 SELECT
   city,
   date,
@@ -38,7 +38,7 @@ SELECT
   timestamp
 FROM `fg-polylabs.weather.polymarket_snapshots`
 WHERE city = 'london'
-  AND date = '2026-03-10'
+  AND date = '2026-03-06'
 ORDER BY temp_threshold, timestamp;
 ```
 
@@ -49,24 +49,79 @@ ORDER BY temp_threshold, timestamp;
 | Column | Type | Mode | Description |
 |---|---|---|---|
 | `city` | STRING | REQUIRED | Normalized city name (lowercase), e.g. `london` |
-| `date` | DATE | REQUIRED | The event date the market resolves on |
-| `timestamp` | TIMESTAMP | REQUIRED | UTC time of this price snapshot (from CLOB price-history feed) |
+| `date` | DATE | REQUIRED | The event resolution date |
+| `timestamp` | TIMESTAMP | REQUIRED | UTC time of this price snapshot |
 | `temp_threshold` | FLOAT64 | REQUIRED | Temperature threshold in °C parsed from the market question |
 | `yes_cost` | FLOAT64 | REQUIRED | Implied probability of YES (0.0–1.0) |
 | `no_cost` | FLOAT64 | REQUIRED | Implied probability of NO (0.0–1.0) |
 | `best_bid` | FLOAT64 | NULLABLE | Best bid for YES token at time of fetch |
 | `best_ask` | FLOAT64 | NULLABLE | Best ask for YES token at time of fetch |
 | `spread` | FLOAT64 | NULLABLE | Bid-ask spread (`best_ask - best_bid`) |
-| `volume_24h` | FLOAT64 | NULLABLE | 24-hour trading volume in USDC at time of fetch |
-| `volume_total` | FLOAT64 | NULLABLE | Lifetime trading volume in USDC at time of fetch |
-| `liquidity` | FLOAT64 | NULLABLE | Market liquidity in USDC at time of fetch |
-| `market_id` | STRING | REQUIRED | Polymarket condition ID (stable market identifier) |
-| `event_slug` | STRING | REQUIRED | Polymarket event slug used to query the Gamma API |
-| `market_end_date` | STRING | NULLABLE | ISO datetime when the market closes and resolves |
-| `market_start_date` | STRING | NULLABLE | ISO datetime when the market opened for trading |
-| `accepting_orders` | BOOL | NULLABLE | Whether the market was still open for trading at fetch time |
-| `neg_risk` | BOOL | NULLABLE | Whether this is a neg-risk market (pooled liquidity; prices behave differently) |
-| `ingested_at` | TIMESTAMP | REQUIRED | UTC time the pipeline collected and wrote this row |
+| `volume_24h` | FLOAT64 | NULLABLE | 24-hour trading volume in USDC |
+| `volume_total` | FLOAT64 | NULLABLE | Lifetime trading volume in USDC |
+| `liquidity` | FLOAT64 | NULLABLE | Market liquidity in USDC |
+| `event_slug` | STRING | REQUIRED | Polymarket event slug |
+| `market_end_date` | STRING | NULLABLE | ISO date when the market closes and resolves |
+
+---
+
+## Data filtering — why rows may appear to be missing
+
+The pipeline applies three filters at ingestion time to avoid storing noise.
+**If a row is absent from the table it does not mean the data is unavailable — it means one of the rules below applied.**
+
+### Filter 1 — Zero-activity markets (entire market dropped)
+
+If a market has `volume_total = 0` AND `liquidity = 0` at the time of fetch, it has never attracted any trading. Its prices are placeholders with no real price discovery behind them. The entire market is skipped.
+
+**What to do if you need it:** re-run the job with `--temp=<threshold>` to force-fetch that specific market regardless of activity, or query Polymarket directly.
+
+### Filter 2 — Post-resolution rows (rows after market close dropped)
+
+Rows with a `timestamp` after `market_end_date` are skipped. Once a market resolves, the price locks at ~0 or ~1 and carries no new information.
+
+**What to do if you need it:** the final pre-resolution price is the last row for that `(event_slug, temp_threshold)` combination in the table.
+
+### Filter 3 — Unchanged prices (rows where price did not move are dropped)
+
+If `yes_cost` has not changed by more than `0.001` (0.1%) from the previous snapshot, the row is dropped. Only rows where the price actually moved are stored.
+
+**This is the most important one to understand when querying.** The table is sparse by design — gaps between timestamps do not mean the price was unknown. They mean the price was the same as the preceding row.
+
+**To reconstruct a continuous price series, use `LAST_VALUE` with `IGNORE NULLS`:**
+
+```sql
+-- Fill gaps: carry the last known price forward for every hour in the window
+WITH spine AS (
+  -- Generate one row per hour for the date range you care about
+  SELECT
+    ts,
+    temp_threshold
+  FROM
+    UNNEST(GENERATE_TIMESTAMP_ARRAY(
+      TIMESTAMP '2026-03-04 00:00:00 UTC',
+      TIMESTAMP '2026-03-06 23:00:00 UTC',
+      INTERVAL 1 HOUR
+    )) AS ts
+  CROSS JOIN UNNEST([13.0, 14.0, 15.0, 16.0]) AS temp_threshold
+),
+prices AS (
+  SELECT timestamp, temp_threshold, yes_cost, no_cost
+  FROM `fg-polylabs.weather.polymarket_snapshots`
+  WHERE event_slug = 'highest-temperature-in-london-on-march-6-2026'
+)
+SELECT
+  s.ts,
+  s.temp_threshold,
+  LAST_VALUE(p.yes_cost IGNORE NULLS) OVER (
+    PARTITION BY s.temp_threshold ORDER BY s.ts
+    ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+  ) AS yes_cost
+FROM spine s
+LEFT JOIN prices p
+  ON p.timestamp = s.ts AND p.temp_threshold = s.temp_threshold
+ORDER BY s.temp_threshold, s.ts;
+```
 
 ---
 
@@ -77,7 +132,7 @@ ORDER BY temp_threshold, timestamp;
 Run once to create all GCP resources (Artifact Registry, service accounts, Workload Identity Federation, Cloud Run Job):
 
 ```bash
-./scripts/setup.sh --github-repo=FutureGadgetLabs/cloud-predict-analytics2
+./scripts/setup.sh --github-repo=FG-PolyLabs/cloud-predict-analytics
 ```
 
 The script prints two values at the end — add them as GitHub Actions secrets:
@@ -99,50 +154,37 @@ Workflow: `.github/workflows/build.yml`
 ### Trigger a job on-demand
 
 ```bash
-# Run now and wait for completion
-./scripts/run.sh execute --city=london --date=2026-03-10
+# Weather event (auto slug construction)
+./scripts/run.sh execute --city=london --date=2026-03-06
 
-# With a specific threshold and per-minute granularity
-./scripts/run.sh execute --city=london --date=2026-03-10 --temp=10 --fidelity=1
+# Any Polymarket event (explicit slug)
+./scripts/run.sh execute --slug=highest-temperature-in-london-on-march-6-2026 --date=2026-03-06
 ```
 
 ### Schedule recurring jobs
 
 ```bash
-# Daily at 8 AM UTC for a fixed city/date/threshold
+# Daily at 8 AM UTC
 ./scripts/run.sh schedule \
   --city=london \
   --date=2026-03-10 \
-  --temp=10 \
   --cron="0 8 * * *"
-
-# With a custom name
-./scripts/run.sh schedule \
-  --city=new-york \
-  --date=2026-03-10 \
-  --temp=15 \
-  --cron="0 */6 * * *" \
-  --name=nyc-15c-every6h
 
 # List all scheduled jobs
 ./scripts/run.sh list-schedules
 
 # Delete a schedule
-./scripts/run.sh delete-schedule --name=nyc-15c-every6h
+./scripts/run.sh delete-schedule --name=<schedule-name>
 ```
 
 ---
 
-## Running the job
+## Running the job locally
 
 ### Prerequisites
 
-- Go 1.22+
-- GCP credentials with BigQuery Data Editor on `fg-polylabs.weather`
-
-```bash
-gcloud auth application-default login
-```
+- Go 1.25+
+- GCP credentials: `gcloud auth application-default login`
 
 ### Build
 
@@ -153,13 +195,14 @@ go build -o polymarket ./cmd/polymarket
 ### Usage
 
 ```
-polymarket --city=<city> --date=<YYYY-MM-DD> [--temp=<celsius>] [--fidelity=<minutes>] [--dry-run]
+polymarket --date=<YYYY-MM-DD> [--city=<city>] [--slug=<event-slug>] [--temp=<celsius>] [--fidelity=<minutes>] [--dry-run]
 ```
 
 | Flag | Default | Description |
 |---|---|---|
-| `--city` | _(required)_ | City name, e.g. `london`, `new-york` |
-| `--date` | _(required)_ | Event date in `YYYY-MM-DD` format |
+| `--date` | _(required)_ | Event resolution date in `YYYY-MM-DD` format |
+| `--city` | | City name for weather events, e.g. `london`. Not needed when `--slug` is set |
+| `--slug` | | Polymarket event slug. Overrides auto slug construction from `--city`/`--date` |
 | `--temp` | `0` (all) | Filter to a specific temperature threshold in °C |
 | `--fidelity` | `60` | Price snapshot granularity in minutes (`1`=per-minute, `60`=hourly) |
 | `--dry-run` | `false` | Print rows as JSONL to stdout instead of loading to BigQuery |
@@ -167,14 +210,14 @@ polymarket --city=<city> --date=<YYYY-MM-DD> [--temp=<celsius>] [--fidelity=<min
 ### Examples
 
 ```bash
-# Dry-run: print all markets for London on March 10 2026 as JSONL
-polymarket --city=london --date=2026-03-10 --dry-run
+# Dry-run: print all markets for London on March 6 as JSONL
+go run ./cmd/polymarket --city=london --date=2026-03-06 --dry-run
 
-# Dry-run: only the 10°C threshold market, per-minute granularity
-polymarket --city=london --date=2026-03-10 --temp=10 --fidelity=1 --dry-run
+# Load to BigQuery using an explicit slug
+go run ./cmd/polymarket --slug=highest-temperature-in-london-on-march-6-2026 --date=2026-03-06
 
-# Load to BigQuery (not yet implemented — use --dry-run for now)
-polymarket --city=london --date=2026-03-10 --temp=10
+# Per-minute granularity for a specific threshold
+go run ./cmd/polymarket --city=london --date=2026-03-06 --temp=16 --fidelity=1 --dry-run
 ```
 
 ---
@@ -192,14 +235,18 @@ Polymarket weather events follow the slug pattern:
 ```
 highest-temperature-in-{city}-on-{month}-{day}-{year}
 ```
-e.g. `highest-temperature-in-london-on-march-10-2026`
+e.g. `highest-temperature-in-london-on-march-6-2026`
 
 ---
 
 ## Project structure
 
 ```
-cmd/polymarket/main.go          CLI entry point, orchestration
-internal/polymarket/client.go   HTTP client for Gamma and CLOB APIs
-internal/polymarket/models.go   API response types and PredictionSnapshot (BQ row)
+cmd/polymarket/main.go             CLI entry point, orchestration, ingestion filters
+internal/polymarket/client.go      HTTP client for Gamma and CLOB APIs
+internal/polymarket/models.go      API response types and PredictionSnapshot (BQ row)
+internal/polymarket/loader.go      BigQuery MERGE writer (staging table → target)
+scripts/setup.sh                   One-time GCP infra provisioning
+scripts/run.sh                     Trigger or schedule Cloud Run Job executions
+.github/workflows/build.yml        CI/CD: build image, push to AR, update Cloud Run Job
 ```
