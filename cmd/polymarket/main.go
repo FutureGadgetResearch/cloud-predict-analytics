@@ -1,12 +1,15 @@
-// polymarket is a CLI runner that pulls Polymarket prediction data for a
-// "highest temperature in <city> on <date>" event. By default it loads rows
-// into BigQuery. Pass --dry-run to print JSONL to stdout instead.
+// polymarket is a CLI runner that pulls Polymarket prediction market data and
+// lands it into BigQuery. Pass --dry-run to print JSONL to stdout instead.
 //
-// Usage:
+// Weather events (auto slug construction):
 //
-//	polymarket --city=london --date=2026-03-10 --temp=10            # load to BQ
-//	polymarket --city=london --date=2026-03-10 --dry-run            # print all markets
-//	polymarket --city=london --date=2026-03-10 --temp=10 --fidelity=1 --dry-run
+//	polymarket --city=london --date=2026-03-10 --temp=10
+//	polymarket --city=london --date=2026-03-10 --dry-run
+//
+// Any Polymarket event (explicit slug):
+//
+//	polymarket --slug=highest-temperature-in-london-on-march-6-2026 --date=2026-03-06 --dry-run
+//	polymarket --slug=will-trump-win-the-2024-election --date=2024-11-05 --dry-run
 package main
 
 import (
@@ -23,15 +26,20 @@ import (
 )
 
 func main() {
-	city := flag.String("city", "", "City name (e.g., london, new-york)")
-	date := flag.String("date", "", "Event date in YYYY-MM-DD format (e.g., 2026-03-10)")
+	city := flag.String("city", "", "City name for weather events (e.g., london, new-york); not required when --slug is set")
+	date := flag.String("date", "", "Event date in YYYY-MM-DD format — used for price history time range (required)")
+	slug := flag.String("slug", "", "Polymarket event slug; overrides auto slug construction from --city/--date")
 	temp := flag.Float64("temp", 0, "Temperature threshold in Celsius to filter a specific market (0 = all markets)")
 	fidelity := flag.Int("fidelity", 60, "Price snapshot granularity in minutes (e.g., 60=hourly, 1=per-minute)")
 	dryRun := flag.Bool("dry-run", false, "Print rows as JSONL to stdout instead of loading to BigQuery")
 	flag.Parse()
 
-	if *city == "" || *date == "" {
-		fmt.Fprintln(os.Stderr, "Usage: polymarket --city=london --date=2026-03-10 [--temp=10] [--fidelity=60]")
+	if *date == "" {
+		fmt.Fprintln(os.Stderr, "Usage: polymarket --date=2026-03-10 [--city=london] [--slug=<event-slug>] [--temp=10] [--fidelity=60]")
+		os.Exit(1)
+	}
+	if *slug == "" && *city == "" {
+		fmt.Fprintln(os.Stderr, "Error: provide either --city (weather events) or --slug (any event)")
 		os.Exit(1)
 	}
 
@@ -40,13 +48,16 @@ func main() {
 		log.Fatalf("invalid date %q: expected YYYY-MM-DD format", *date)
 	}
 
-	slug := buildEventSlug(*city, eventDate)
-	log.Printf("resolved event slug: %s", slug)
+	eventSlug := *slug
+	if eventSlug == "" {
+		eventSlug = buildEventSlug(*city, eventDate)
+	}
+	log.Printf("resolved event slug: %s", eventSlug)
 
 	client := polymarket.NewClient()
 
 	// The event endpoint is the canonical source: it returns the event's markets directly.
-	event, err := client.GetEventBySlug(slug)
+	event, err := client.GetEventBySlug(eventSlug)
 	if err != nil {
 		log.Fatalf("could not find event for slug %q: %v", slug, err)
 	}
@@ -77,6 +88,8 @@ func main() {
 			log.Fatalf("no market found matching temperature threshold %.1f°C", *temp)
 		}
 	}
+
+	cityLabel := normalizeCity(*city) // empty string when --slug used without --city
 
 	// Day boundaries in UTC.
 	dayStart := time.Date(eventDate.Year(), eventDate.Month(), eventDate.Day(), 0, 0, 0, 0, time.UTC)
@@ -124,7 +137,7 @@ func main() {
 				noPrice = 1.0 - pt.P
 			}
 			snapshots = append(snapshots, polymarket.PredictionSnapshot{
-				City:            normalizeCity(*city),
+				City:            cityLabel,
 				Date:            *date,
 				Timestamp:       time.Unix(pt.T, 0).UTC(),
 				TempThreshold:   threshold,
@@ -137,7 +150,7 @@ func main() {
 				VolumeTotal:     market.VolumeTotal,
 				Liquidity:       market.Liquidity,
 				MarketID:        market.ConditionID,
-				EventSlug:       slug,
+				EventSlug:       eventSlug,
 				MarketEndDate:   market.EndDateIso,
 				MarketStartDate: market.StartDateIso,
 				AcceptingOrders: market.AcceptingOrders,

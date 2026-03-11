@@ -1,12 +1,16 @@
 #!/usr/bin/env bash
-# run.sh — trigger the polymarket Cloud Run Job on-demand or create a Cloud Scheduler job.
+# run.sh — trigger the weather-polymarket Cloud Run Job on-demand or create a Cloud Scheduler job.
 #
-# Usage:
+# Weather events (auto slug):
 #   ./scripts/run.sh execute --city=london --date=2026-03-10 --temp=10
-#   ./scripts/run.sh execute --city=london --date=2026-03-10 --temp=10 --fidelity=1
+#   ./scripts/run.sh execute --city=london --date=2026-03-10 --fidelity=1
 #
+# Any Polymarket event (explicit slug):
+#   ./scripts/run.sh execute --slug=highest-temperature-in-london-on-march-6-2026 --date=2026-03-06
+#
+# Scheduling:
 #   ./scripts/run.sh schedule --city=london --date=2026-03-10 --temp=10 --cron="0 8 * * *"
-#   ./scripts/run.sh schedule --city=london --date=2026-03-10 --temp=10 --cron="0 8 * * *" --name=london-10c-daily
+#   ./scripts/run.sh schedule --slug=some-event-slug --date=2026-03-10 --cron="0 8 * * *" --name=my-schedule
 #
 #   ./scripts/run.sh list-schedules
 #   ./scripts/run.sh delete-schedule --name=london-10c-daily
@@ -16,7 +20,7 @@ set -euo pipefail
 # ── Config ────────────────────────────────────────────────────────────────────
 PROJECT_ID="fg-polylabs"
 REGION="us-central1"
-JOB_NAME="polymarket"
+JOB_NAME="weather-polymarket"
 RUNNER_SA="polymarket-runner@${PROJECT_ID}.iam.gserviceaccount.com"
 
 # ── Parse subcommand ──────────────────────────────────────────────────────────
@@ -31,6 +35,7 @@ fi
 # ── Parse flags ───────────────────────────────────────────────────────────────
 CITY=""
 DATE=""
+SLUG=""
 TEMP="0"
 FIDELITY="60"
 CRON=""
@@ -40,6 +45,7 @@ for arg in "$@"; do
   case $arg in
     --city=*)     CITY="${arg#*=}" ;;
     --date=*)     DATE="${arg#*=}" ;;
+    --slug=*)     SLUG="${arg#*=}" ;;
     --temp=*)     TEMP="${arg#*=}" ;;
     --fidelity=*) FIDELITY="${arg#*=}" ;;
     --cron=*)     CRON="${arg#*=}" ;;
@@ -49,7 +55,12 @@ done
 
 # Build the container args array for the Cloud Run job overrides
 build_args() {
-  local args="\"--city=${CITY}\", \"--date=${DATE}\""
+  local args="\"--date=${DATE}\""
+  if [[ -n "$SLUG" ]]; then
+    args="${args}, \"--slug=${SLUG}\""
+  else
+    args="${args}, \"--city=${CITY}\""
+  fi
   if [[ "$TEMP" != "0" ]]; then
     args="${args}, \"--temp=${TEMP}\""
   fi
@@ -61,10 +72,15 @@ build_args() {
 
 # Generate a schedule name from flags if not provided
 default_schedule_name() {
-  local city_slug="${CITY//-/_}"
-  local date_slug="${DATE//-/}"
-  local temp_slug="${TEMP//./_}"
-  echo "polymarket_${city_slug}_${temp_slug}c_${date_slug}"
+  if [[ -n "$SLUG" ]]; then
+    local slug_short="${SLUG:0:40}"
+    echo "polymarket_${slug_short//-/_}"
+  else
+    local city_slug="${CITY//-/_}"
+    local date_slug="${DATE//-/}"
+    local temp_slug="${TEMP//./_}"
+    echo "polymarket_${city_slug}_${temp_slug}c_${date_slug}"
+  fi
 }
 
 # ── Subcommands ───────────────────────────────────────────────────────────────
@@ -72,23 +88,34 @@ default_schedule_name() {
 case "$SUBCOMMAND" in
 
   execute)
-    if [[ -z "$CITY" || -z "$DATE" ]]; then
-      echo "Error: --city and --date are required for execute"
+    if [[ -z "$DATE" ]]; then
+      echo "Error: --date is required for execute"
+      exit 1
+    fi
+    if [[ -z "$SLUG" && -z "$CITY" ]]; then
+      echo "Error: provide either --city (weather events) or --slug (any event)"
       exit 1
     fi
 
     ARGS=$(build_args)
     echo "==> Executing Cloud Run Job: ${JOB_NAME}"
-    echo "    city=${CITY}  date=${DATE}  temp=${TEMP}  fidelity=${FIDELITY}"
+    if [[ -n "$SLUG" ]]; then
+      echo "    slug=${SLUG}  date=${DATE}  fidelity=${FIDELITY}"
+    else
+      echo "    city=${CITY}  date=${DATE}  temp=${TEMP}  fidelity=${FIDELITY}"
+    fi
+
+    # Build comma-separated args for gcloud
+    GCLOUD_ARGS="--date=${DATE}"
+    [[ -n "$SLUG" ]]       && GCLOUD_ARGS="${GCLOUD_ARGS},--slug=${SLUG}"
+    [[ -z "$SLUG" ]]       && GCLOUD_ARGS="${GCLOUD_ARGS},--city=${CITY}"
+    [[ "$TEMP" != "0" ]]   && GCLOUD_ARGS="${GCLOUD_ARGS},--temp=${TEMP}"
+    [[ "$FIDELITY" != "60" ]] && GCLOUD_ARGS="${GCLOUD_ARGS},--fidelity=${FIDELITY}"
 
     gcloud run jobs execute "${JOB_NAME}" \
       --region="${REGION}" \
       --project="${PROJECT_ID}" \
-      --args="--city=${CITY},--date=${DATE}$(
-        [[ "$TEMP" != "0" ]] && echo ",--temp=${TEMP}" || true
-      )$(
-        [[ "$FIDELITY" != "60" ]] && echo ",--fidelity=${FIDELITY}" || true
-      )" \
+      --args="${GCLOUD_ARGS}" \
       --wait
 
     echo ""
@@ -97,9 +124,13 @@ case "$SUBCOMMAND" in
     ;;
 
   schedule)
-    if [[ -z "$CITY" || -z "$DATE" || -z "$CRON" ]]; then
-      echo "Error: --city, --date, and --cron are required for schedule"
+    if [[ -z "$DATE" || -z "$CRON" ]]; then
+      echo "Error: --date and --cron are required for schedule"
       echo "Example cron: \"0 8 * * *\" (daily at 8 AM UTC)"
+      exit 1
+    fi
+    if [[ -z "$SLUG" && -z "$CITY" ]]; then
+      echo "Error: provide either --city (weather events) or --slug (any event)"
       exit 1
     fi
 

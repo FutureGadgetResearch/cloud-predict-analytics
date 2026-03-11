@@ -10,7 +10,7 @@ env:
   REGION: us-central1
   AR_REPO: polymarket
   IMAGE: us-central1-docker.pkg.dev/fg-polylabs/polymarket/polymarket
-  JOB_NAME: polymarket
+  JOB_NAME: weather-polymarket
   GITHUB_ORG: FG-PolyLabs
 
 jobs:
