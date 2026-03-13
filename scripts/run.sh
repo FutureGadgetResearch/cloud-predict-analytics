@@ -141,9 +141,13 @@ case "$SUBCOMMAND" in
     ;;
 
   schedule)
-    if [[ -z "$DATE" || -z "$CRON" ]]; then
-      echo "Error: --date and --cron are required for schedule"
+    if [[ -z "$CRON" ]]; then
+      echo "Error: --cron is required for schedule"
       echo "Example cron: \"0 8 * * *\" (daily at 8 AM UTC)"
+      exit 1
+    fi
+    if [[ -z "$DATE" && -z "$YESTERDAY" ]]; then
+      echo "Error: provide either --date or --yesterday for schedule"
       exit 1
     fi
     if [[ -z "$SLUG" && -z "$CITY" ]]; then
