@@ -40,22 +40,31 @@ TEMP="0"
 FIDELITY="60"
 CRON=""
 SCHEDULE_NAME=""
+NO_VOLUME=""
+YESTERDAY=""
 
 for arg in "$@"; do
   case $arg in
-    --city=*)     CITY="${arg#*=}" ;;
-    --date=*)     DATE="${arg#*=}" ;;
-    --slug=*)     SLUG="${arg#*=}" ;;
-    --temp=*)     TEMP="${arg#*=}" ;;
-    --fidelity=*) FIDELITY="${arg#*=}" ;;
-    --cron=*)     CRON="${arg#*=}" ;;
-    --name=*)     SCHEDULE_NAME="${arg#*=}" ;;
+    --city=*)      CITY="${arg#*=}" ;;
+    --date=*)      DATE="${arg#*=}" ;;
+    --slug=*)      SLUG="${arg#*=}" ;;
+    --temp=*)      TEMP="${arg#*=}" ;;
+    --fidelity=*)  FIDELITY="${arg#*=}" ;;
+    --cron=*)      CRON="${arg#*=}" ;;
+    --name=*)      SCHEDULE_NAME="${arg#*=}" ;;
+    --no-volume)   NO_VOLUME="true" ;;
+    --yesterday)   YESTERDAY="true" ;;
   esac
 done
 
 # Build the container args array for the Cloud Run job overrides
 build_args() {
-  local args="\"--date=${DATE}\""
+  local args
+  if [[ -n "$YESTERDAY" ]]; then
+    args="\"--yesterday\""
+  else
+    args="\"--date=${DATE}\""
+  fi
   if [[ -n "$SLUG" ]]; then
     args="${args}, \"--slug=${SLUG}\""
   else
@@ -66,6 +75,9 @@ build_args() {
   fi
   if [[ "$FIDELITY" != "60" ]]; then
     args="${args}, \"--fidelity=${FIDELITY}\""
+  fi
+  if [[ -n "$NO_VOLUME" ]]; then
+    args="${args}, \"--no-volume\""
   fi
   echo "${args}"
 }
@@ -106,11 +118,16 @@ case "$SUBCOMMAND" in
     fi
 
     # Build comma-separated args for gcloud
-    GCLOUD_ARGS="--date=${DATE}"
-    [[ -n "$SLUG" ]]       && GCLOUD_ARGS="${GCLOUD_ARGS},--slug=${SLUG}"
-    [[ -z "$SLUG" ]]       && GCLOUD_ARGS="${GCLOUD_ARGS},--city=${CITY}"
-    [[ "$TEMP" != "0" ]]   && GCLOUD_ARGS="${GCLOUD_ARGS},--temp=${TEMP}"
+    if [[ -n "$YESTERDAY" ]]; then
+      GCLOUD_ARGS="--yesterday"
+    else
+      GCLOUD_ARGS="--date=${DATE}"
+    fi
+    [[ -n "$SLUG" ]]          && GCLOUD_ARGS="${GCLOUD_ARGS},--slug=${SLUG}"
+    [[ -z "$SLUG" ]]          && GCLOUD_ARGS="${GCLOUD_ARGS},--city=${CITY}"
+    [[ "$TEMP" != "0" ]]      && GCLOUD_ARGS="${GCLOUD_ARGS},--temp=${TEMP}"
     [[ "$FIDELITY" != "60" ]] && GCLOUD_ARGS="${GCLOUD_ARGS},--fidelity=${FIDELITY}"
+    [[ -n "$NO_VOLUME" ]]     && GCLOUD_ARGS="${GCLOUD_ARGS},--no-volume"
 
     gcloud run jobs execute "${JOB_NAME}" \
       --region="${REGION}" \

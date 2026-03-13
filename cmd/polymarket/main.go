@@ -29,7 +29,8 @@ import (
 
 func main() {
 	city := flag.String("city", "", "City name for weather events (e.g., london, new-york); not required when --slug is set")
-	date := flag.String("date", "", "Event date in YYYY-MM-DD format — used for price history time range (required)")
+	date := flag.String("date", "", "Event date in YYYY-MM-DD format — used for price history time range (required unless --yesterday is set)")
+	yesterday := flag.Bool("yesterday", false, "Use yesterday's UTC date as the event date (overrides --date)")
 	slug := flag.String("slug", "", "Polymarket event slug; overrides auto slug construction from --city/--date")
 	temp := flag.Float64("temp", 0, "Temperature threshold in Celsius to filter a specific market (0 = all markets)")
 	fidelity := flag.Int("fidelity", 60, "Price snapshot granularity in minutes (e.g., 60=hourly, 1=per-minute)")
@@ -37,8 +38,13 @@ func main() {
 	noVolume := flag.Bool("no-volume", false, "Store NULL for volume/liquidity/bid-ask fields (use for historical backfills where market-state data is misleading)")
 	flag.Parse()
 
+	if *yesterday {
+		y := time.Now().UTC().AddDate(0, 0, -1)
+		s := y.Format("2006-01-02")
+		date = &s
+	}
 	if *date == "" {
-		fmt.Fprintln(os.Stderr, "Usage: polymarket --date=2026-03-10 [--city=london] [--slug=<event-slug>] [--temp=10] [--fidelity=60]")
+		fmt.Fprintln(os.Stderr, "Usage: polymarket --date=2026-03-10 [--city=london] [--slug=<event-slug>] [--temp=10] [--fidelity=60] [--yesterday]")
 		os.Exit(1)
 	}
 	if *slug == "" && *city == "" {
