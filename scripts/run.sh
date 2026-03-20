@@ -102,8 +102,8 @@ default_schedule_name() {
 case "$SUBCOMMAND" in
 
   execute)
-    if [[ -z "$DATE" ]]; then
-      echo "Error: --date is required for execute"
+    if [[ -z "$DATE" && -z "$YESTERDAY" ]]; then
+      echo "Error: --date or --yesterday is required for execute"
       exit 1
     fi
     if [[ -z "$SLUG" && -z "$CITY" ]]; then
