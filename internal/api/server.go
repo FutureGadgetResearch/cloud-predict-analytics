@@ -12,10 +12,11 @@ import (
 
 // Server is the HTTP API server.
 type Server struct {
-	mux     *http.ServeMux
-	bq      *bigquery.Client
-	auth    *firebaseauth.Client
-	project string
+	mux       *http.ServeMux
+	bq        *bigquery.Client
+	auth      *firebaseauth.Client
+	project   string
+	gcsBucket string
 }
 
 // NewServer creates a new Server, wiring up all routes.
@@ -25,10 +26,11 @@ func NewServer(ctx context.Context, project string, auth *firebaseauth.Client) (
 		return nil, err
 	}
 	s := &Server{
-		mux:     http.NewServeMux(),
-		bq:      bq,
-		auth:    auth,
-		project: project,
+		mux:       http.NewServeMux(),
+		bq:        bq,
+		auth:      auth,
+		project:   project,
+		gcsBucket: getenv("GCS_DATA_BUCKET", "fg-polylabs-weather-data"),
 	}
 	s.routes()
 	return s, nil
@@ -40,6 +42,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("PUT /tracked-cities/{source}/{city}", s.updateCity)
 	s.mux.HandleFunc("DELETE /tracked-cities/{source}/{city}", s.deleteCity)
 	s.mux.HandleFunc("GET /snapshots", s.querySnapshots)
+	s.mux.HandleFunc("POST /sync", s.syncData)
 }
 
 // ServeHTTP applies CORS middleware to every request.
