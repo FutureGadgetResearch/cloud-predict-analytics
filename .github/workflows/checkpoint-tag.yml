@@ -1,0 +1,64 @@
+name: Daily Checkpoint Tag
+
+on:
+  schedule:
+    # 2:00 AM UTC daily
+    - cron: '0 2 * * *'
+  workflow_dispatch:
+    inputs:
+      reason:
+        description: 'Reason for manual checkpoint (optional)'
+        required: false
+
+permissions:
+  contents: write
+
+jobs:
+  tag:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # need full history to inspect tags
+
+      - name: Create checkpoint tag if new commits exist
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          HEAD=$(git rev-parse HEAD)
+          TODAY=$(date -u +%Y-%m-%d)
+          BASE_TAG="checkpoint-${TODAY}"
+
+          # Find the most recent checkpoint tag and the commit it points to
+          LAST_TAG=$(git tag --list 'checkpoint-*' --sort=-version:refname | head -1)
+          if [ -n "$LAST_TAG" ]; then
+            LAST_TAGGED_COMMIT=$(git rev-list -n 1 "$LAST_TAG")
+          else
+            LAST_TAGGED_COMMIT=""
+          fi
+
+          # Skip if HEAD hasn't moved since the last checkpoint
+          if [ "$HEAD" = "$LAST_TAGGED_COMMIT" ]; then
+            echo "No new commits since last checkpoint tag ($LAST_TAG). Skipping."
+            exit 0
+          fi
+
+          # Resolve a unique tag name (handle same-day re-runs)
+          TAG="$BASE_TAG"
+          COUNTER=2
+          while git rev-parse "$TAG" >/dev/null 2>&1; do
+            TAG="${BASE_TAG}-${COUNTER}"
+            COUNTER=$((COUNTER + 1))
+          done
+
+          # Annotate with context
+          COMMIT_MSG=$(git log -1 --pretty=format:"%s" HEAD)
+          ANNOTATION="Checkpoint ${TAG}"$'\n'"HEAD: ${HEAD:0:8} — ${COMMIT_MSG}"
+          if [ -n "${{ github.event.inputs.reason }}" ]; then
+            ANNOTATION="${ANNOTATION}"$'\n'"Reason: ${{ github.event.inputs.reason }}"
+          fi
+
+          git tag -a "$TAG" -m "$ANNOTATION"
+          git push origin "$TAG"
+          echo "Created tag: $TAG"

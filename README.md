@@ -1,5 +1,17 @@
 # cloud-predict-analytics
 
+## Multi-Repo Project
+
+This is one of three repositories:
+
+| Repo | Role |
+|------|------|
+| [`cloud-predict-analytics-frontend-admin`](https://github.com/FG-PolyLabs/cloud-predict-analytics-frontend-admin) | Admin UI (Hugo + Firebase Auth + GitHub Pages) |
+| [`cloud-predict-analytics`](https://github.com/FG-PolyLabs/cloud-predict-analytics) | **This repo** — backend (Cloud Run API + scheduled job) |
+| [`cloud-predict-analytics-data`](https://github.com/FG-PolyLabs/cloud-predict-analytics-data) | Reference city data (JSONL → GCS → BigQuery) |
+
+---
+
 Go backend for the FutureGadgetLabs weather prediction analytics platform. It has two roles:
 
 - **Batch jobs** — Cloud Run Jobs that pull Polymarket prediction market data for weather events and land it into BigQuery. A single Cloud Scheduler fires daily and the job iterates over all cities configured in the `tracked_cities` reference table.
