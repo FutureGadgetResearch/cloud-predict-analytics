@@ -18,7 +18,12 @@ func main() {
 		project = "fg-polylabs"
 	}
 
-	app, err := firebase.NewApp(ctx, &firebase.Config{ProjectID: project})
+	firebaseProject := os.Getenv("FIREBASE_PROJECT_ID")
+	if firebaseProject == "" {
+		firebaseProject = "collection-showcase-auth"
+	}
+
+	app, err := firebase.NewApp(ctx, &firebase.Config{ProjectID: firebaseProject})
 	if err != nil {
 		log.Fatalf("firebase.NewApp: %v", err)
 	}
