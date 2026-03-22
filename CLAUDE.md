@@ -43,7 +43,7 @@ Two Go entry points under `cmd/`:
 | Cloud Scheduler | `weather-daily` — `0 1 * * *` UTC, triggers `weather-polymarket` |
 | Artifact Registry | `us-central1-docker.pkg.dev/fg-polylabs/polymarket/polymarket` |
 | BigQuery | Project `fg-polylabs`, dataset `weather` |
-| GCS (reference data) | `fg-polylabs-data` — managed by `cloud-predict-analytics-data` repo |
+| GCS (reference data) | `weather` — managed by `cloud-predict-analytics-data` repo |
 | Firebase Project | `collection-showcase-auth` — token validation on all API writes |
 
 ### Code Structure
