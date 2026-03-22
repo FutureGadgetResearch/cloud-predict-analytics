@@ -37,8 +37,8 @@ func NewServer(ctx context.Context, project string, auth *firebaseauth.Client) (
 func (s *Server) routes() {
 	s.mux.HandleFunc("GET /tracked-cities", s.listCities)
 	s.mux.HandleFunc("POST /tracked-cities", s.createCity)
-	s.mux.HandleFunc("PUT /tracked-cities/{city}", s.updateCity)
-	s.mux.HandleFunc("DELETE /tracked-cities/{city}", s.deleteCity)
+	s.mux.HandleFunc("PUT /tracked-cities/{source}/{city}", s.updateCity)
+	s.mux.HandleFunc("DELETE /tracked-cities/{source}/{city}", s.deleteCity)
 	s.mux.HandleFunc("GET /snapshots", s.querySnapshots)
 }
 

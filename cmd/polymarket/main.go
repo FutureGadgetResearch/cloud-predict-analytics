@@ -77,7 +77,7 @@ func runAllCities(ctx context.Context, date string, fidelity int, dryRun, noVolu
 	defer bq.Close()
 
 	it, err := bq.Query(fmt.Sprintf(
-		"SELECT city FROM `%s.weather.tracked_cities` WHERE active = TRUE ORDER BY city",
+		"SELECT city FROM `%s.weather.tracked_cities` WHERE active = TRUE AND source = 'polymarket' ORDER BY city",
 		bqProject,
 	)).Read(ctx)
 	if err != nil {

@@ -13,6 +13,7 @@ import (
 
 type City struct {
 	City        string `json:"city"`
+	Source      string `json:"source"`
 	DisplayName string `json:"display_name"`
 	Timezone    string `json:"timezone"`
 	Active      bool   `json:"active"`
@@ -21,13 +22,24 @@ type City struct {
 }
 
 func (s *Server) listCities(w http.ResponseWriter, r *http.Request) {
+	source := r.URL.Query().Get("source")
+
+	where := ""
+	var params []bigquery.QueryParameter
+	if source != "" {
+		where = "WHERE source = @source"
+		params = append(params, bigquery.QueryParameter{Name: "source", Value: source})
+	}
+
 	q := s.bq.Query(fmt.Sprintf(`
-		SELECT city, display_name, timezone, active,
+		SELECT city, source, display_name, timezone, active,
 		       CAST(added_date AS STRING) AS added_date,
 		       IFNULL(notes, '') AS notes
 		FROM %s
-		ORDER BY city
-	`, s.table("tracked_cities")))
+		%s
+		ORDER BY source, city
+	`, s.table("tracked_cities"), where))
+	q.Parameters = params
 
 	it, err := q.Read(r.Context())
 	if err != nil {
@@ -46,11 +58,12 @@ func (s *Server) listCities(w http.ResponseWriter, r *http.Request) {
 		}
 		cities = append(cities, City{
 			City:        fmt.Sprint(row[0]),
-			DisplayName: fmt.Sprint(row[1]),
-			Timezone:    fmt.Sprint(row[2]),
-			Active:      row[3].(bool),
-			AddedDate:   fmt.Sprint(row[4]),
-			Notes:       fmt.Sprint(row[5]),
+			Source:      fmt.Sprint(row[1]),
+			DisplayName: fmt.Sprint(row[2]),
+			Timezone:    fmt.Sprint(row[3]),
+			Active:      row[4].(bool),
+			AddedDate:   fmt.Sprint(row[5]),
+			Notes:       fmt.Sprint(row[6]),
 		})
 	}
 	if cities == nil {
@@ -66,8 +79,9 @@ func (s *Server) createCity(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	body.City = strings.ToLower(strings.TrimSpace(body.City))
-	if body.City == "" || body.DisplayName == "" || body.Timezone == "" {
-		jsonError(w, "city, display_name, and timezone are required", http.StatusBadRequest)
+	body.Source = strings.ToLower(strings.TrimSpace(body.Source))
+	if body.City == "" || body.Source == "" || body.DisplayName == "" || body.Timezone == "" {
+		jsonError(w, "city, source, display_name, and timezone are required", http.StatusBadRequest)
 		return
 	}
 	if body.AddedDate == "" {
@@ -75,11 +89,12 @@ func (s *Server) createCity(w http.ResponseWriter, r *http.Request) {
 	}
 
 	q := s.bq.Query(fmt.Sprintf(`
-		INSERT INTO %s (city, display_name, timezone, active, added_date, notes)
-		VALUES (@city, @display_name, @timezone, @active, @added_date, @notes)
+		INSERT INTO %s (city, source, display_name, timezone, active, added_date, notes)
+		VALUES (@city, @source, @display_name, @timezone, @active, @added_date, @notes)
 	`, s.table("tracked_cities")))
 	q.Parameters = []bigquery.QueryParameter{
 		{Name: "city", Value: body.City},
+		{Name: "source", Value: body.Source},
 		{Name: "display_name", Value: body.DisplayName},
 		{Name: "timezone", Value: body.Timezone},
 		{Name: "active", Value: body.Active},
@@ -102,6 +117,7 @@ func (s *Server) createCity(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) updateCity(w http.ResponseWriter, r *http.Request) {
 	city := r.PathValue("city")
+	source := r.PathValue("source")
 	var body City
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		jsonError(w, "invalid request body", http.StatusBadRequest)
@@ -114,10 +130,11 @@ func (s *Server) updateCity(w http.ResponseWriter, r *http.Request) {
 		    timezone     = @timezone,
 		    active       = @active,
 		    notes        = @notes
-		WHERE city = @city
+		WHERE city = @city AND source = @source
 	`, s.table("tracked_cities")))
 	q.Parameters = []bigquery.QueryParameter{
 		{Name: "city", Value: city},
+		{Name: "source", Value: source},
 		{Name: "display_name", Value: body.DisplayName},
 		{Name: "timezone", Value: body.Timezone},
 		{Name: "active", Value: body.Active},
@@ -138,12 +155,14 @@ func (s *Server) updateCity(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) deleteCity(w http.ResponseWriter, r *http.Request) {
 	city := r.PathValue("city")
+	source := r.PathValue("source")
 
 	q := s.bq.Query(fmt.Sprintf(`
-		DELETE FROM %s WHERE city = @city
+		DELETE FROM %s WHERE city = @city AND source = @source
 	`, s.table("tracked_cities")))
 	q.Parameters = []bigquery.QueryParameter{
 		{Name: "city", Value: city},
+		{Name: "source", Value: source},
 	}
 
 	job, err := q.Run(r.Context())
