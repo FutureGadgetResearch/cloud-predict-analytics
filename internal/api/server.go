@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"os"
 	"strings"
 
 	"cloud.google.com/go/bigquery"
@@ -12,11 +13,13 @@ import (
 
 // Server is the HTTP API server.
 type Server struct {
-	mux       *http.ServeMux
-	bq        *bigquery.Client
-	auth      *firebaseauth.Client
-	project   string
-	gcsBucket string
+	mux            *http.ServeMux
+	bq             *bigquery.Client
+	auth           *firebaseauth.Client
+	project        string
+	gcsBucket      string
+	githubToken    string
+	githubDataRepo string
 }
 
 // NewServer creates a new Server, wiring up all routes.
@@ -26,11 +29,13 @@ func NewServer(ctx context.Context, project string, auth *firebaseauth.Client) (
 		return nil, err
 	}
 	s := &Server{
-		mux:       http.NewServeMux(),
-		bq:        bq,
-		auth:      auth,
-		project:   project,
-		gcsBucket: getenv("GCS_DATA_BUCKET", "fg-polylabs-weather-data"),
+		mux:            http.NewServeMux(),
+		bq:             bq,
+		auth:           auth,
+		project:        project,
+		gcsBucket:      getenv("GCS_DATA_BUCKET", "fg-polylabs-weather-data"),
+		githubToken:    os.Getenv("GITHUB_TOKEN"),
+		githubDataRepo: getenv("GITHUB_DATA_REPO", "FG-PolyLabs/cloud-predict-analytics-data"),
 	}
 	s.routes()
 	return s, nil
