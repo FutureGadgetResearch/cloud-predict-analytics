@@ -1,50 +1,50 @@
 # cloud-predict-analytics
 
-A Go CLI that pulls Polymarket prediction market data for weather-based events ("highest temperature in \<city\> on \<date\>") and lands it into BigQuery for analysis.
+Go backend for the FutureGadgetLabs weather prediction analytics platform. It has two roles:
+
+- **Batch jobs** — Cloud Run Jobs that pull Polymarket prediction market data for weather events and land it into BigQuery. A single Cloud Scheduler fires daily and the job iterates over all cities configured in the `tracked_cities` reference table.
+- **API service** — Cloud Run Service that exposes the BigQuery data to the frontend admin dashboard.
 
 ---
 
-## Where the data lives
+## Live resources
 
-After running the job, rows land in BigQuery at:
+| Resource | Name | URL / details |
+|---|---|---|
+| Cloud Run Service | `weather-api` | `https://weather-api-846376753241.us-central1.run.app` |
+| Cloud Run Job | `weather-polymarket` | args: `--all-cities --yesterday` |
+| Cloud Scheduler | `weather-daily` | `0 1 * * *` UTC → triggers `weather-polymarket` |
+| Artifact Registry | `polymarket` | `us-central1-docker.pkg.dev/fg-polylabs/polymarket/polymarket` |
+
+---
+
+## System architecture
 
 ```
-Project:  fg-polylabs
-Dataset:  weather
-Table:    polymarket_snapshots
-```
-
-Full table path: **`fg-polylabs.weather.polymarket_snapshots`**
-
-The table is **day-partitioned on `date`** and **clustered on `city`**, so queries filtered by city and date range are cheap.
-
-### Quick look in BigQuery console
-
-1. Open [BigQuery Studio](https://console.cloud.google.com/bigquery?project=fg-polylabs)
-2. In the explorer, expand **fg-polylabs → weather → polymarket_snapshots**
-3. Click **Preview** to see recent rows
-
-### Quick SQL
-
-```sql
--- Price history for all thresholds in London on a given date
-SELECT
-  city,
-  date,
-  temp_threshold,
-  yes_cost,
-  no_cost,
-  spread,
-  timestamp
-FROM `fg-polylabs.weather.polymarket_snapshots`
-WHERE city = 'london'
-  AND date = '2026-03-06'
-ORDER BY temp_threshold, timestamp;
+Cloud Scheduler (daily, 1 job)
+        │
+        ▼
+Cloud Run Job  ──reads──▶  tracked_cities (BQ reference table)
+        │                   active cities, timezones
+        │  for each city
+        ▼
+  Polymarket APIs
+  (Gamma + CLOB)
+        │
+        ▼
+  polymarket_snapshots (BQ output table)
+        │
+        ▼
+Cloud Run Service  ◀──── Frontend Admin Dashboard
 ```
 
 ---
 
-## Table schema
+## BigQuery tables
+
+### `fg-polylabs.weather.polymarket_snapshots` — output table
+
+Price snapshots for each tracked Polymarket weather market. Day-partitioned on `date`, clustered on `city`.
 
 | Column | Type | Mode | Description |
 |---|---|---|---|
@@ -62,6 +62,55 @@ ORDER BY temp_threshold, timestamp;
 | `liquidity` | FLOAT64 | NULLABLE | Market liquidity in USDC |
 | `event_slug` | STRING | REQUIRED | Polymarket event slug |
 | `market_end_date` | STRING | NULLABLE | ISO date when the market closes and resolves |
+
+**Quick look:**
+
+```sql
+-- Price history for all thresholds in London on a given date
+SELECT city, date, temp_threshold, yes_cost, no_cost, spread, timestamp
+FROM `fg-polylabs.weather.polymarket_snapshots`
+WHERE city = 'london'
+  AND date = '2026-03-06'
+ORDER BY temp_threshold, timestamp;
+```
+
+---
+
+### `fg-polylabs.weather.tracked_cities` — reference table
+
+Controls which cities are included in each scheduled run. To add or pause a city, update this table — no scheduler changes needed.
+
+| Column | Type | Mode | Description |
+|---|---|---|---|
+| `city` | STRING | REQUIRED | Slug form used in Polymarket slugs, e.g. `london`, `new-york` |
+| `display_name` | STRING | REQUIRED | Human-readable name, e.g. `London` |
+| `timezone` | STRING | REQUIRED | IANA timezone identifier, e.g. `Europe/London` |
+| `active` | BOOL | REQUIRED | Set to `FALSE` to pause tracking without removing the row |
+| `added_date` | DATE | REQUIRED | Date this city was added to tracking |
+| `notes` | STRING | NULLABLE | Optional free-text notes |
+
+**Create and seed the table** (uses Application Default Credentials):
+
+```bash
+go run ./cmd/setup
+```
+
+This is idempotent — existing rows are skipped on re-run.
+
+**Add a city:**
+
+```sql
+INSERT INTO `fg-polylabs.weather.tracked_cities` (city, display_name, timezone, active, added_date)
+VALUES ('sydney', 'Sydney', 'Australia/Sydney', TRUE, CURRENT_DATE());
+```
+
+**Pause a city:**
+
+```sql
+UPDATE `fg-polylabs.weather.tracked_cities`
+SET active = FALSE
+WHERE city = 'dallas';
+```
 
 ---
 
@@ -93,10 +142,7 @@ If `yes_cost` has not changed by more than `0.001` (0.1%) from the previous snap
 ```sql
 -- Fill gaps: carry the last known price forward for every hour in the window
 WITH spine AS (
-  -- Generate one row per hour for the date range you care about
-  SELECT
-    ts,
-    temp_threshold
+  SELECT ts, temp_threshold
   FROM
     UNNEST(GENERATE_TIMESTAMP_ARRAY(
       TIMESTAMP '2026-03-04 00:00:00 UTC',
@@ -142,6 +188,12 @@ The script prints two values at the end — add them as GitHub Actions secrets:
 | `WIF_PROVIDER` | Workload Identity Federation provider resource name |
 | `WIF_SERVICE_ACCOUNT` | CI service account email |
 
+Then create and seed the `tracked_cities` table:
+
+```bash
+bq query --project_id=fg-polylabs --use_legacy_sql=false < sql/tracked_cities.sql
+```
+
 ### CI/CD — GitHub Actions
 
 Every push to `main` automatically:
@@ -151,25 +203,33 @@ Every push to `main` automatically:
 
 Workflow: `.github/workflows/build.yml`
 
+### Cloud Scheduler — single daily job
+
+One scheduler triggers the Cloud Run Job daily. The job reads all `active = TRUE` cities from `tracked_cities` and fetches snapshots for each.
+
+```bash
+# Create the single daily scheduler (runs at 10:00 UTC)
+./scripts/run.sh schedule \
+  --yesterday \
+  --cron="0 10 * * *" \
+  --name=polymarket-daily
+```
+
+To add or remove cities from the daily run, update `tracked_cities` in BigQuery — no scheduler changes needed.
+
 ### Trigger a job on-demand
 
 ```bash
-# Weather event (auto slug construction)
-./scripts/run.sh execute --city=london --date=2026-03-06
+# Run for all active cities (yesterday's markets)
+./scripts/run.sh execute --yesterday
 
-# Any Polymarket event (explicit slug)
-./scripts/run.sh execute --slug=highest-temperature-in-london-on-march-6-2026 --date=2026-03-06
+# Run for a specific city and date
+./scripts/run.sh execute --city=london --date=2026-03-06
 ```
 
-### Schedule recurring jobs
+### Manage schedules
 
 ```bash
-# Daily at 8 AM UTC
-./scripts/run.sh schedule \
-  --city=london \
-  --date=2026-03-10 \
-  --cron="0 8 * * *"
-
 # List all scheduled jobs
 ./scripts/run.sh list-schedules
 
@@ -206,6 +266,8 @@ polymarket --date=<YYYY-MM-DD> [--city=<city>] [--slug=<event-slug>] [--temp=<ce
 | `--temp` | `0` (all) | Filter to a specific temperature threshold in °C |
 | `--fidelity` | `60` | Price snapshot granularity in minutes (`1`=per-minute, `60`=hourly) |
 | `--dry-run` | `false` | Print rows as JSONL to stdout instead of loading to BigQuery |
+| `--yesterday` | `false` | Use yesterday's UTC date as the event date |
+| `--no-volume` | `false` | Store NULL for volume/liquidity fields (use for historical backfills) |
 
 ### Examples
 
@@ -239,13 +301,43 @@ e.g. `highest-temperature-in-london-on-march-6-2026`
 
 ---
 
+## API endpoints
+
+The API service (`cmd/api`) is a Cloud Run Service consumed by the frontend admin. Every request must include a Firebase ID token: `Authorization: Bearer <token>`.
+
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/tracked-cities` | List all tracked cities |
+| `POST` | `/tracked-cities` | Add a city |
+| `PUT` | `/tracked-cities/:city` | Update display name, timezone, active flag, or notes |
+| `DELETE` | `/tracked-cities/:city` | Remove a city |
+| `GET` | `/snapshots?city=&date=&limit=` | Query snapshot data |
+
+### Running the API server locally
+
+```bash
+go run ./cmd/api
+# Listening on :8080
+
+# Set a different port
+PORT=9000 go run ./cmd/api
+```
+
+---
+
 ## Project structure
 
 ```
 cmd/polymarket/main.go             CLI entry point, orchestration, ingestion filters
+cmd/api/main.go                    HTTP API server (Cloud Run Service)
+cmd/setup/main.go                  One-time BQ table creation and seeding
 internal/polymarket/client.go      HTTP client for Gamma and CLOB APIs
 internal/polymarket/models.go      API response types and PredictionSnapshot (BQ row)
 internal/polymarket/loader.go      BigQuery MERGE writer (staging table → target)
+internal/api/server.go             HTTP router, CORS, Firebase auth middleware
+internal/api/cities.go             CRUD handlers for tracked_cities
+internal/api/snapshots.go          Query handler for polymarket_snapshots
+sql/tracked_cities.sql             Reference DDL (go run ./cmd/setup is preferred)
 scripts/setup.sh                   One-time GCP infra provisioning
 scripts/run.sh                     Trigger or schedule Cloud Run Job executions
 .github/workflows/build.yml        CI/CD: build image, push to AR, update Cloud Run Job
