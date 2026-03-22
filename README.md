@@ -315,15 +315,17 @@ e.g. `highest-temperature-in-london-on-march-6-2026`
 
 ## API endpoints
 
-The API service (`cmd/api`) is a Cloud Run Service consumed by the frontend admin. Every request must include a Firebase ID token: `Authorization: Bearer <token>`.
+The API service (`cmd/api`) is a Cloud Run Service consumed by the frontend admin. Protected routes require a Firebase ID token: `Authorization: Bearer <token>`.
 
-| Method | Path | Description |
-|---|---|---|
-| `GET` | `/tracked-cities` | List all tracked cities |
-| `POST` | `/tracked-cities` | Add a city |
-| `PUT` | `/tracked-cities/:city` | Update display name, timezone, active flag, or notes |
-| `DELETE` | `/tracked-cities/:city` | Remove a city |
-| `GET` | `/snapshots?city=&date=&limit=` | Query snapshot data |
+| Method | Path | Auth | Description |
+|---|---|---|---|
+| `GET` | `/health` | None | Liveness check — returns `{"status":"ok"}` |
+| `GET` | `/info` | None | Non-sensitive runtime config (service, revision, project, region, bq_dataset) |
+| `GET` | `/tracked-cities` | Required | List all tracked cities |
+| `POST` | `/tracked-cities` | Required | Add a city |
+| `PUT` | `/tracked-cities/:city` | Required | Update display name, timezone, active flag, or notes |
+| `DELETE` | `/tracked-cities/:city` | Required | Remove a city |
+| `GET` | `/snapshots?city=&date=&limit=` | Required | Query snapshot data |
 
 ### Running the API server locally
 

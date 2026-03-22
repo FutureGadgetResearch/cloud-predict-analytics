@@ -42,9 +42,19 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /snapshots", s.querySnapshots)
 }
 
-// ServeHTTP applies CORS and auth middleware to every request.
+// ServeHTTP applies CORS middleware to every request.
+// /health and /info are public; all other routes require a valid Firebase token.
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	withCORS(s.withAuth(s.mux)).ServeHTTP(w, r)
+	withCORS(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/health":
+			s.health(w, r)
+		case "/info":
+			s.info(w, r)
+		default:
+			s.withAuth(s.mux).ServeHTTP(w, r)
+		}
+	})).ServeHTTP(w, r)
 }
 
 func withCORS(next http.Handler) http.Handler {
