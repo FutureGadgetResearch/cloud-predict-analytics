@@ -17,9 +17,11 @@ type Server struct {
 	bq             *bigquery.Client
 	auth           *firebaseauth.Client
 	project        string
+	region         string
 	gcsBucket      string
 	githubToken    string
 	githubDataRepo string
+	polymarketJob  string
 }
 
 // NewServer creates a new Server, wiring up all routes.
@@ -33,9 +35,11 @@ func NewServer(ctx context.Context, project string, auth *firebaseauth.Client) (
 		bq:             bq,
 		auth:           auth,
 		project:        project,
+		region:         getenv("CLOUD_RUN_REGION", "us-central1"),
 		gcsBucket:      getenv("GCS_DATA_BUCKET", "fg-polylabs-weather-data"),
 		githubToken:    os.Getenv("GITHUB_TOKEN"),
 		githubDataRepo: getenv("GITHUB_DATA_REPO", "FG-PolyLabs/cloud-predict-analytics-data"),
+		polymarketJob:  getenv("POLYMARKET_JOB_NAME", "weather-polymarket"),
 	}
 	s.routes()
 	return s, nil
@@ -48,6 +52,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("DELETE /tracked-cities/{source}/{city}", s.deleteCity)
 	s.mux.HandleFunc("GET /snapshots", s.querySnapshots)
 	s.mux.HandleFunc("POST /sync", s.syncData)
+	s.mux.HandleFunc("POST /backfill", s.triggerBackfill)
 }
 
 // ServeHTTP applies CORS middleware to every request.

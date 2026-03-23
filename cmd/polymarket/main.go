@@ -32,26 +32,66 @@ const bqProject = "fg-polylabs"
 
 func main() {
 	city      := flag.String("city", "", "City name for weather events (e.g., london, new-york); not required when --slug is set")
-	date      := flag.String("date", "", "Event date in YYYY-MM-DD format (required unless --yesterday is set)")
+	date      := flag.String("date", "", "Event date in YYYY-MM-DD format (required unless --yesterday or --date-range is set)")
+	dateRange := flag.String("date-range", "", "Date range for backfill in YYYY-MM-DD:YYYY-MM-DD format (inclusive)")
 	yesterday := flag.Bool("yesterday", false, "Use yesterday's UTC date as the event date (overrides --date)")
 	slug      := flag.String("slug", "", "Polymarket event slug; overrides auto slug construction from --city/--date")
 	temp      := flag.Float64("temp", 0, "Temperature threshold in °C to filter a specific market (0 = all markets)")
 	fidelity  := flag.Int("fidelity", 60, "Price snapshot granularity in minutes (e.g., 60=hourly, 1=per-minute)")
 	dryRun    := flag.Bool("dry-run", false, "Print rows as JSONL to stdout instead of loading to BigQuery")
 	noVolume  := flag.Bool("no-volume", false, "Store NULL for volume/liquidity/bid-ask fields (use for historical backfills)")
-	allCities := flag.Bool("all-cities", false, "Run for all active cities in the tracked_cities BQ table (use with --yesterday)")
+	allCities := flag.Bool("all-cities", false, "Run for all active cities in the tracked_cities BQ table (use with --yesterday or --date-range)")
 	flag.Parse()
 
 	if *yesterday {
 		y := time.Now().UTC().AddDate(0, 0, -1).Format("2006-01-02")
 		date = &y
 	}
-	if *date == "" {
-		fmt.Fprintln(os.Stderr, "Error: provide --date=YYYY-MM-DD or --yesterday")
-		os.Exit(1)
-	}
 
 	ctx := context.Background()
+
+	// Date range mode: iterate each day in the range.
+	if *dateRange != "" {
+		parts := strings.SplitN(*dateRange, ":", 2)
+		if len(parts) != 2 {
+			fmt.Fprintln(os.Stderr, "Error: --date-range must be YYYY-MM-DD:YYYY-MM-DD")
+			os.Exit(1)
+		}
+		from, err1 := time.Parse("2006-01-02", parts[0])
+		to, err2   := time.Parse("2006-01-02", parts[1])
+		if err1 != nil || err2 != nil || from.After(to) {
+			fmt.Fprintln(os.Stderr, "Error: invalid --date-range; expected YYYY-MM-DD:YYYY-MM-DD with from <= to")
+			os.Exit(1)
+		}
+		if !*allCities && *city == "" && *slug == "" {
+			fmt.Fprintln(os.Stderr, "Error: --date-range requires --all-cities or --city")
+			os.Exit(1)
+		}
+		log.Printf("backfill: %s → %s", parts[0], parts[1])
+		var failures []string
+		for d := from; !d.After(to); d = d.AddDate(0, 0, 1) {
+			ds := d.Format("2006-01-02")
+			log.Printf("=== date %s ===", ds)
+			if *allCities {
+				runAllCities(ctx, ds, *fidelity, *dryRun, *noVolume)
+			} else {
+				if err := processCity(ctx, *city, ds, *slug, *temp, *fidelity, *dryRun, *noVolume); err != nil {
+					log.Printf("[%s] FAILED: %v", ds, err)
+					failures = append(failures, fmt.Sprintf("%s: %v", ds, err))
+				}
+			}
+		}
+		if len(failures) > 0 {
+			log.Fatalf("backfill completed with %d failures:\n  %s", len(failures), strings.Join(failures, "\n  "))
+		}
+		log.Printf("backfill complete")
+		return
+	}
+
+	if *date == "" {
+		fmt.Fprintln(os.Stderr, "Error: provide --date=YYYY-MM-DD, --yesterday, or --date-range=YYYY-MM-DD:YYYY-MM-DD")
+		os.Exit(1)
+	}
 
 	if *allCities {
 		runAllCities(ctx, *date, *fidelity, *dryRun, *noVolume)
