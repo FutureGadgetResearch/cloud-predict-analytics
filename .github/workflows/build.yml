@@ -58,7 +58,8 @@ jobs:
           gcloud run jobs update ${{ env.SYNC_JOB_NAME }} \
             --image=${{ env.IMAGE }}:${{ github.sha }} \
             --region=${{ env.REGION }} \
-            --project=${{ env.PROJECT_ID }}
+            --project=${{ env.PROJECT_ID }} \
+            --update-env-vars="GITHUB_TOKEN=${{ secrets.DATA_SYNC_PAT }},GITHUB_DATA_REPO=FG-PolyLabs/cloud-predict-analytics-data"
 
       - name: Update Cloud Run Service image
         run: |
