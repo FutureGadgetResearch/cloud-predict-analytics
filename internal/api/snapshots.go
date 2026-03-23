@@ -27,11 +27,20 @@ type Snapshot struct {
 }
 
 func (s *Server) querySnapshots(w http.ResponseWriter, r *http.Request) {
-	city := r.URL.Query().Get("city")
-	date := r.URL.Query().Get("date")
-	limitStr := r.URL.Query().Get("limit")
+	city      := r.URL.Query().Get("city")
+	date      := r.URL.Query().Get("date")
+	dateFrom  := r.URL.Query().Get("date_from")
+	dateTo    := r.URL.Query().Get("date_to")
+	limitStr  := r.URL.Query().Get("limit")
+
+	// limit=0 means no limit; default 200, hard cap 10000
 	limit := 200
-	if n, err := strconv.Atoi(limitStr); err == nil && n > 0 && n <= 1000 {
+	if limitStr == "0" {
+		limit = 0
+	} else if n, err := strconv.Atoi(limitStr); err == nil && n > 0 {
+		if n > 10000 {
+			n = 10000
+		}
 		limit = n
 	}
 
@@ -41,9 +50,24 @@ func (s *Server) querySnapshots(w http.ResponseWriter, r *http.Request) {
 		where += " AND city = @city"
 		params = append(params, bigquery.QueryParameter{Name: "city", Value: city})
 	}
+	// single date takes precedence; otherwise use date range
 	if date != "" {
 		where += " AND date = @date"
 		params = append(params, bigquery.QueryParameter{Name: "date", Value: date})
+	} else {
+		if dateFrom != "" {
+			where += " AND date >= @date_from"
+			params = append(params, bigquery.QueryParameter{Name: "date_from", Value: dateFrom})
+		}
+		if dateTo != "" {
+			where += " AND date <= @date_to"
+			params = append(params, bigquery.QueryParameter{Name: "date_to", Value: dateTo})
+		}
+	}
+
+	limitClause := ""
+	if limit > 0 {
+		limitClause = fmt.Sprintf("LIMIT %d", limit)
 	}
 
 	q := s.bq.Query(fmt.Sprintf(`
@@ -59,8 +83,8 @@ func (s *Server) querySnapshots(w http.ResponseWriter, r *http.Request) {
 		FROM %s
 		%s
 		ORDER BY timestamp DESC
-		LIMIT %d
-	`, s.table("polymarket_snapshots"), where, limit))
+		%s
+	`, s.table("polymarket_snapshots"), where, limitClause))
 	q.Parameters = params
 
 	it, err := q.Read(r.Context())
