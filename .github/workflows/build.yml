@@ -6,12 +6,13 @@ on:
   workflow_dispatch:
 
 env:
-  PROJECT_ID:   fg-polylabs
-  REGION:       us-central1
-  AR_REPO:      polymarket
-  IMAGE:        us-central1-docker.pkg.dev/fg-polylabs/polymarket/polymarket
-  JOB_NAME:     weather-polymarket
-  SERVICE_NAME: weather-api
+  PROJECT_ID:    fg-polylabs
+  REGION:        us-central1
+  AR_REPO:       polymarket
+  IMAGE:         us-central1-docker.pkg.dev/fg-polylabs/polymarket/polymarket
+  JOB_NAME:      weather-polymarket
+  SYNC_JOB_NAME: weather-sync
+  SERVICE_NAME:  weather-api
 
 jobs:
   build-and-deploy:
@@ -45,9 +46,16 @@ jobs:
           docker push ${{ env.IMAGE }}:${{ github.sha }}
           docker push ${{ env.IMAGE }}:latest
 
-      - name: Update Cloud Run Job image
+      - name: Update Cloud Run Job image (weather-polymarket)
         run: |
           gcloud run jobs update ${{ env.JOB_NAME }} \
+            --image=${{ env.IMAGE }}:${{ github.sha }} \
+            --region=${{ env.REGION }} \
+            --project=${{ env.PROJECT_ID }}
+
+      - name: Update Cloud Run Job image (weather-sync)
+        run: |
+          gcloud run jobs update ${{ env.SYNC_JOB_NAME }} \
             --image=${{ env.IMAGE }}:${{ github.sha }} \
             --region=${{ env.REGION }} \
             --project=${{ env.PROJECT_ID }}
