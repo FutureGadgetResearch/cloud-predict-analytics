@@ -7,6 +7,7 @@ import (
 
 	"cloud.google.com/go/bigquery"
 	"google.golang.org/api/iterator"
+	runapi "google.golang.org/api/run/v2"
 )
 
 type Snapshot struct {
@@ -124,6 +125,46 @@ func (s *Server) querySnapshots(w http.ResponseWriter, r *http.Request) {
 		rows = []Snapshot{}
 	}
 	jsonOK(w, rows)
+}
+
+// resetSnapshots truncates polymarket_snapshots then triggers weather-polymarket
+// with --all-cities so it reloads from scratch.
+// POST /snapshots/reset — requires auth.
+func (s *Server) resetSnapshots(w http.ResponseWriter, r *http.Request) {
+	// Step 1: truncate
+	q := s.bq.Query(fmt.Sprintf(`TRUNCATE TABLE %s`, s.table("polymarket_snapshots")))
+	job, err := q.Run(r.Context())
+	if err != nil {
+		jsonError(w, "truncate failed: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if _, err := job.Wait(r.Context()); err != nil {
+		jsonError(w, "truncate failed: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	// Step 2: trigger weather-polymarket with --all-cities (default date behaviour)
+	svc, err := runapi.NewService(r.Context())
+	if err != nil {
+		jsonError(w, "failed to create Cloud Run client: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	jobName := fmt.Sprintf("projects/%s/locations/%s/jobs/%s", s.project, s.region, s.polymarketJob)
+	runReq := &runapi.GoogleCloudRunV2RunJobRequest{
+		Overrides: &runapi.GoogleCloudRunV2Overrides{
+			ContainerOverrides: []*runapi.GoogleCloudRunV2ContainerOverride{
+				{Args: []string{"--all-cities"}},
+			},
+		},
+	}
+	op, err := svc.Projects.Locations.Jobs.Run(jobName, runReq).Do()
+	if err != nil {
+		jsonError(w, "failed to trigger reload job: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	jsonOK(w, map[string]string{"execution": op.Name})
 }
 
 func toFloat(v bigquery.Value) float64 {

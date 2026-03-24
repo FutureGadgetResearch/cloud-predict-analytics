@@ -51,6 +51,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("PUT /tracked-cities/{source}/{city}", s.updateCity)
 	s.mux.HandleFunc("DELETE /tracked-cities/{source}/{city}", s.deleteCity)
 	s.mux.HandleFunc("GET /snapshots", s.querySnapshots)
+	s.mux.HandleFunc("POST /snapshots/reset", s.resetSnapshots)
 	s.mux.HandleFunc("POST /sync", s.syncData)
 	s.mux.HandleFunc("POST /backfill", s.triggerBackfill)
 }
