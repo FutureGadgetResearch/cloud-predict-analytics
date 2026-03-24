@@ -128,7 +128,7 @@ WHERE city = 'dallas';
 
 ## Data filtering — why rows may appear to be missing
 
-The pipeline applies three filters at ingestion time to avoid storing noise.
+The pipeline applies four filters at ingestion time to avoid storing noise.
 **If a row is absent from the table it does not mean the data is unavailable — it means one of the rules below applied.**
 
 ### Filter 1 — Zero-activity markets (entire market dropped)
@@ -143,9 +143,15 @@ Rows with a `timestamp` after `market_end_date` are skipped. Once a market resol
 
 **What to do if you need it:** the final pre-resolution price is the last row for that `(event_slug, temp_threshold)` combination in the table.
 
-### Filter 3 — Unchanged prices (rows where price did not move are dropped)
+### Filter 3 — Effectively-resolved prices (extreme YES probabilities dropped)
 
-If `yes_cost` has not changed by more than `0.001` (0.1%) from the previous snapshot, the row is dropped. Only rows where the price actually moved are stored.
+Rows where `yes_cost >= 0.98` or `yes_cost <= 0.02` are dropped. Prices this extreme indicate the market has already resolved with very high certainty and carry no meaningful price discovery signal.
+
+**What to do if you need it:** query Polymarket directly for the tail of each market's price history.
+
+### Filter 4 — Unchanged prices (rows where price did not move are dropped)
+
+If `yes_cost` has not changed by more than `0.0005` (0.05%) from the previous snapshot, the row is dropped. Only rows where the price actually moved are stored.
 
 **This is the most important one to understand when querying.** The table is sparse by design — gaps between timestamps do not mean the price was unknown. They mean the price was the same as the preceding row.
 
