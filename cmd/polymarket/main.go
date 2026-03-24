@@ -262,11 +262,11 @@ func processCity(ctx context.Context, city, date, slug string, temp float64, fid
 				continue
 			}
 			// Filter 3: skip effectively-resolved prices.
-			if pt.P >= 0.99 || pt.P <= 0.01 {
+			if pt.P >= 0.98 || pt.P <= 0.02 {
 				continue
 			}
-			// Filter 4: skip unchanged prices (< 0.1% movement).
-			if math.Abs(pt.P-lastYesCost) < 0.001 {
+			// Filter 4: skip unchanged prices (< 0.05% movement).
+			if math.Abs(pt.P-lastYesCost) < 0.0005 {
 				continue
 			}
 			lastYesCost = pt.P
