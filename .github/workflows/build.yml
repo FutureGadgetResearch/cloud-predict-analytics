@@ -50,6 +50,7 @@ jobs:
         run: |
           gcloud run jobs update ${{ env.JOB_NAME }} \
             --image=${{ env.IMAGE }}:${{ github.sha }} \
+            --task-timeout=90m \
             --region=${{ env.REGION }} \
             --project=${{ env.PROJECT_ID }}
 
