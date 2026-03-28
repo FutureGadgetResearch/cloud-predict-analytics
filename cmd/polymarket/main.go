@@ -236,7 +236,9 @@ func processCity(ctx context.Context, city, date, slug string, temp float64, fid
 		}
 
 		// Filter 1: skip markets with no trading activity.
-		if market.VolumeTotal == 0 && market.Liquidity == 0 {
+		// Bypass when --no-volume is set: resolved markets return 0 for these fields
+		// but price history is still available via the CLOB API.
+		if !noVolume && market.VolumeTotal == 0 && market.Liquidity == 0 {
 			log.Printf("[%s] skipping market %.1f°C — no trading activity", city, threshold)
 			continue
 		}
@@ -380,10 +382,17 @@ func extractTempThreshold(question string) float64 {
 		if idx == -1 {
 			continue
 		}
-		if token := extractNumberBefore(question, idx); token != "" {
-			if v, err := strconv.ParseFloat(token, 64); err == nil {
-				return v
-			}
+		token := extractNumberBefore(question, idx)
+		if token == "" {
+			continue
+		}
+		// Handle range format like "68-69°F": '-' at position > 0 is a range separator,
+		// not a leading negative sign. Take the upper bound (number right before the marker).
+		if i := strings.LastIndex(token, "-"); i > 0 {
+			token = token[i+1:]
+		}
+		if v, err := strconv.ParseFloat(token, 64); err == nil {
+			return v
 		}
 	}
 	return 0
