@@ -73,7 +73,10 @@ func main() {
 			ds := d.Format("2006-01-02")
 			log.Printf("=== date %s ===", ds)
 			if *allCities {
-				runAllCities(ctx, ds, *fidelity, *dryRun, *noVolume)
+				if err := runAllCities(ctx, ds, *fidelity, *dryRun, *noVolume); err != nil {
+					log.Printf("[%s] partial failure (continuing): %v", ds, err)
+					failures = append(failures, fmt.Sprintf("%s: %v", ds, err))
+				}
 			} else {
 				if err := processCity(ctx, *city, ds, *slug, *temp, *fidelity, *dryRun, *noVolume); err != nil {
 					log.Printf("[%s] FAILED: %v", ds, err)
@@ -82,7 +85,7 @@ func main() {
 			}
 		}
 		if len(failures) > 0 {
-			log.Fatalf("backfill completed with %d failures:\n  %s", len(failures), strings.Join(failures, "\n  "))
+			log.Fatalf("backfill completed with %d date(s) having partial failures:\n  %s", len(failures), strings.Join(failures, "\n  "))
 		}
 		log.Printf("backfill complete")
 		return
@@ -94,7 +97,9 @@ func main() {
 	}
 
 	if *allCities {
-		runAllCities(ctx, *date, *fidelity, *dryRun, *noVolume)
+		if err := runAllCities(ctx, *date, *fidelity, *dryRun, *noVolume); err != nil {
+			log.Fatalf("%v", err)
+		}
 		return
 	}
 
@@ -109,10 +114,11 @@ func main() {
 }
 
 // runAllCities queries the tracked_cities reference table and processes each active city.
-func runAllCities(ctx context.Context, date string, fidelity int, dryRun, noVolume bool) {
+// Returns an error if any cities failed, but always processes all cities regardless.
+func runAllCities(ctx context.Context, date string, fidelity int, dryRun, noVolume bool) error {
 	bq, err := bigquery.NewClient(ctx, bqProject)
 	if err != nil {
-		log.Fatalf("bigquery.NewClient: %v", err)
+		return fmt.Errorf("bigquery.NewClient: %w", err)
 	}
 	defer bq.Close()
 
@@ -121,7 +127,7 @@ func runAllCities(ctx context.Context, date string, fidelity int, dryRun, noVolu
 		bqProject,
 	)).Read(ctx)
 	if err != nil {
-		log.Fatalf("querying tracked_cities: %v", err)
+		return fmt.Errorf("querying tracked_cities: %w", err)
 	}
 
 	var cities []string
@@ -130,13 +136,13 @@ func runAllCities(ctx context.Context, date string, fidelity int, dryRun, noVolu
 		if err := it.Next(&row); err == iterator.Done {
 			break
 		} else if err != nil {
-			log.Fatalf("reading tracked_cities: %v", err)
+			return fmt.Errorf("reading tracked_cities: %w", err)
 		}
 		cities = append(cities, fmt.Sprint(row[0]))
 	}
 
 	if len(cities) == 0 {
-		log.Fatal("no active cities found in tracked_cities — nothing to do")
+		return fmt.Errorf("no active cities found in tracked_cities — nothing to do")
 	}
 	log.Printf("running for %d active cities: %v", len(cities), cities)
 
@@ -152,9 +158,10 @@ func runAllCities(ctx context.Context, date string, fidelity int, dryRun, noVolu
 	}
 
 	if len(failures) > 0 {
-		log.Fatalf("%d/%d cities failed:\n  %s", len(failures), len(cities), strings.Join(failures, "\n  "))
+		return fmt.Errorf("%d/%d cities failed:\n  %s", len(failures), len(cities), strings.Join(failures, "\n  "))
 	}
 	log.Printf("all %d cities completed successfully", len(cities))
+	return nil
 }
 
 // processCity fetches Polymarket data for one city/date and loads it to BigQuery.
